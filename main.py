@@ -49,9 +49,7 @@ client = OpenAI(
     base_url="https://llm.api.cloud.yandex.net/v1"
 )
 
-MODEL = (
-    f"gpt://{YANDEX_FOLDER_ID}/yandexgpt/rc"
-)
+MODEL = f"gpt://{YANDEX_FOLDER_ID}/yandexgpt/rc"
 
 
 # =========================================================
@@ -59,32 +57,21 @@ MODEL = (
 # =========================================================
 
 def get_db():
-
     if not DATABASE_URL:
         return None
 
-    return psycopg2.connect(
-        DATABASE_URL
-    )
+    return psycopg2.connect(DATABASE_URL)
 
 
 def init_db():
-
     if not DATABASE_URL:
-
-        print(
-            "DATABASE_URL не задан. "
-            "Постоянная память отключена."
-        )
-
+        print("DATABASE_URL не задан. Постоянная память отключена.")
         return
 
     try:
-
         conn = get_db()
         cur = conn.cursor()
 
-        # История сообщений
         cur.execute("""
             CREATE TABLE IF NOT EXISTS conversation_messages (
                 id SERIAL PRIMARY KEY,
@@ -95,7 +82,6 @@ def init_db():
             )
         """)
 
-        # Долговременная память
         cur.execute("""
             CREATE TABLE IF NOT EXISTS user_memory (
                 id SERIAL PRIMARY KEY,
@@ -106,37 +92,24 @@ def init_db():
         """)
 
         conn.commit()
-
         cur.close()
         conn.close()
 
-        print(
-            "PostgreSQL: база готова."
-        )
+        print("PostgreSQL: OK")
 
     except Exception as e:
-
-        print(
-            "Ошибка инициализации БД:",
-            repr(e)
-        )
+        print("DB INIT ERROR:", repr(e))
 
 
 # =========================================================
 # ИСТОРИЯ
 # =========================================================
 
-def save_message(
-    session_id,
-    role,
-    content
-):
-
+def save_message(session_id, role, content):
     if not DATABASE_URL:
         return
 
     try:
-
         conn = get_db()
         cur = conn.cursor()
 
@@ -146,36 +119,22 @@ def save_message(
             (session_id, role, content)
             VALUES (%s, %s, %s)
             """,
-            (
-                session_id,
-                role,
-                content
-            )
+            (session_id, role, content)
         )
 
         conn.commit()
-
         cur.close()
         conn.close()
 
     except Exception as e:
-
-        print(
-            "Ошибка сохранения сообщения:",
-            repr(e)
-        )
+        print("SAVE MESSAGE ERROR:", repr(e))
 
 
-def get_recent_messages(
-    session_id,
-    limit=30
-):
-
+def get_recent_messages(session_id, limit=30):
     if not DATABASE_URL:
         return []
 
     try:
-
         conn = get_db()
 
         cur = conn.cursor(
@@ -190,10 +149,7 @@ def get_recent_messages(
             ORDER BY id DESC
             LIMIT %s
             """,
-            (
-                session_id,
-                limit
-            )
+            (session_id, limit)
         )
 
         rows = cur.fetchall()
@@ -212,12 +168,7 @@ def get_recent_messages(
         ]
 
     except Exception as e:
-
-        print(
-            "Ошибка загрузки истории:",
-            repr(e)
-        )
-
+        print("GET HISTORY ERROR:", repr(e))
         return []
 
 
@@ -226,17 +177,18 @@ def get_recent_messages(
 # =========================================================
 
 def save_memory(memory):
-
     if not DATABASE_URL:
-        return False
+        return
 
     memory = memory.strip()
 
     if not memory:
-        return False
+        return
+
+    if len(memory) > 300:
+        return
 
     try:
-
         conn = get_db()
         cur = conn.cursor()
 
@@ -245,8 +197,7 @@ def save_memory(memory):
             INSERT INTO user_memory (memory)
             VALUES (%s)
             ON CONFLICT (memory)
-            DO UPDATE SET
-                updated_at = CURRENT_TIMESTAMP
+            DO UPDATE SET updated_at = CURRENT_TIMESTAMP
             """,
             (memory,)
         )
@@ -256,32 +207,17 @@ def save_memory(memory):
         cur.close()
         conn.close()
 
-        print(
-            "MEMORY SAVED:",
-            memory
-        )
-
-        return True
+        print("MEMORY:", memory)
 
     except Exception as e:
-
-        print(
-            "Ошибка сохранения памяти:",
-            repr(e)
-        )
-
-        return False
+        print("MEMORY ERROR:", repr(e))
 
 
-def get_memories(
-    limit=100
-):
-
+def get_memories(limit=80):
     if not DATABASE_URL:
         return []
 
     try:
-
         conn = get_db()
         cur = conn.cursor()
 
@@ -300,71 +236,47 @@ def get_memories(
         cur.close()
         conn.close()
 
-        return [
-            row[0]
-            for row in rows
-        ]
+        return [row[0] for row in rows]
 
     except Exception as e:
-
-        print(
-            "Ошибка получения памяти:",
-            repr(e)
-        )
-
+        print("GET MEMORY ERROR:", repr(e))
         return []
 
 
 def delete_memories():
-
     if not DATABASE_URL:
         return
 
     try:
-
         conn = get_db()
         cur = conn.cursor()
 
-        cur.execute(
-            "DELETE FROM user_memory"
-        )
+        cur.execute("DELETE FROM user_memory")
 
         conn.commit()
-
         cur.close()
         conn.close()
 
-        print(
-            "MEMORY CLEARED"
-        )
+        print("MEMORY CLEARED")
 
     except Exception as e:
-
-        print(
-            "Ошибка очистки памяти:",
-            repr(e)
-        )
+        print("DELETE MEMORY ERROR:", repr(e))
 
 
 # =========================================================
-# ЯВНАЯ КОМАНДА "ЗАПОМНИ"
+# ЯВНАЯ ПАМЯТЬ
 # =========================================================
 
-def extract_memory(text):
+def extract_explicit_memory(text):
 
     patterns = [
-
         r"^\s*запомни(?:,\s*|\s+)(.+)$",
-
         r"^\s*не забудь(?:,\s*|\s+)(.+)$",
-
-        r"^\s*запиши в память(?:,\s*|\s+)(.+)$",
-
-        r"^\s*сохрани в память(?:,\s*|\s+)(.+)$"
+        r"^\s*сохрани(?:,\s*|\s+)(.+)$",
+        r"^\s*запиши(?:,\s*|\s+)(.+)$"
     ]
 
     for pattern in patterns:
-
         match = re.match(
             pattern,
             text,
@@ -372,177 +284,116 @@ def extract_memory(text):
         )
 
         if match:
+            value = match.group(1).strip()
 
-            memory = (
-                match
-                .group(1)
-                .strip()
-            )
-
-            if memory:
-                return memory
+            if value:
+                return value
 
     return None
 
 
 def is_forget_command(text):
 
-    phrases = [
+    text = text.lower()
 
+    commands = [
         "забудь всё",
-
         "забудь все",
-
         "очисти память",
-
         "удали память",
-
         "забудь что ты обо мне знаешь"
     ]
 
-    text = text.lower()
-
     return any(
-        phrase in text
-        for phrase in phrases
+        command in text
+        for command in commands
     )
 
 
 # =========================================================
-# АВТОМАТИЧЕСКОЕ ОБУЧЕНИЕ ПАМЯТИ
+# ПРОСТОЕ АВТОМАТИЧЕСКОЕ ЗАПОМИНАНИЕ
 # =========================================================
 
-def extract_automatic_memory(
-    user_text
-):
+def learn_from_message(text):
 
     """
-    Отдельный запрос к YandexGPT.
+    Не делает дополнительный запрос к YandexGPT.
 
-    Модель определяет, сообщил ли пользователь
-    что-нибудь достаточно полезное о себе,
-    что стоит сохранить надолго.
-
-    Возвращает:
-        строку памяти
-        или None
+    Сохраняет только явно выраженные устойчивые
+    предпочтения/интересы пользователя.
     """
 
-    if not DATABASE_URL:
-        return None
+    text = text.strip()
 
-    prompt = f"""
-Ты — модуль долговременной памяти персонального
-голосового помощника.
+    patterns = [
+        (
+            r"\bя люблю (.+)",
+            "Пользователь любит {}."
+        ),
+        (
+            r"\bмне нравится (.+)",
+            "Пользователю нравится {}."
+        ),
+        (
+            r"\bмне нравятся (.+)",
+            "Пользователю нравятся {}."
+        ),
+        (
+            r"\bя увлекаюсь (.+)",
+            "Пользователь увлекается {}."
+        ),
+        (
+            r"\bя интересуюсь (.+)",
+            "Пользователь интересуется {}."
+        ),
+        (
+            r"\bя хочу научиться (.+)",
+            "Пользователь хочет научиться {}."
+        ),
+        (
+            r"\bя хочу заняться (.+)",
+            "Пользователь хочет заняться {}."
+        ),
+        (
+            r"\bмоя любимая тема (.+)",
+            "Пользователю особенно интересна тема {}."
+        )
+    ]
 
-Проанализируй сообщение пользователя.
+    for pattern, template in patterns:
 
-Сообщение:
-{user_text}
-
-Определи, сообщил ли пользователь информацию
-о себе, которая может пригодиться в будущих
-разговорах.
-
-Особенно интересны:
-- увлечения;
-- интересы;
-- любимые темы;
-- предпочтения;
-- цели;
-- планы;
-- проекты;
-- навыки;
-- желаемый стиль общения;
-- устойчивые факты о пользователе.
-
-НЕ сохраняй:
-- случайные фразы;
-- одноразовые действия;
-- временное настроение;
-- случайные вопросы;
-- чужие сведения;
-- чувствительные личные данные.
-
-Если полезной информации НЕТ,
-ответь строго:
-
-NONE
-
-Если информация есть,
-сформулируй ОДНУ короткую фразу
-от третьего лица.
-
-Например:
-
-Пользователь:
-"Я давно увлекаюсь фотографией."
-
-Ответ:
-Пользователь увлекается фотографией.
-
-Пользователь:
-"Я хочу научиться программировать."
-
-Ответ:
-Пользователь хочет научиться программированию.
-
-Пользователь:
-"Сегодня я хочу посмотреть фильм."
-
-Ответ:
-NONE
-
-Отвечай только одной фразой памяти
-или словом NONE.
-"""
-
-    try:
-
-        response = client.chat.completions.create(
-
-            model=MODEL,
-
-            messages=[
-                {
-                    "role": "system",
-                    "content": prompt
-                }
-            ],
-
-            temperature=0,
-
-            max_tokens=150
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE
         )
 
-        result = (
-            response
-            .choices[0]
-            .message
-            .content
-            .strip()
-        )
+        if not match:
+            continue
 
-        if (
-            not result
-            or result.upper() == "NONE"
-        ):
-            return None
+        value = match.group(1).strip()
 
-        # Защита от случайно огромного текста
-        if len(result) > 300:
-            return None
+        if not value:
+            continue
 
-        return result
+        # Не сохраняем огромные куски текста.
+        if len(value) > 150:
+            continue
 
-    except Exception as e:
+        # Отсекаем случайные продолжения.
+        value = re.split(
+            r"[.!?]\s+",
+            value
+        )[0].strip()
 
-        print(
-            "Ошибка авто-памяти:",
-            repr(e)
-        )
+        if len(value) < 2:
+            continue
 
-        return None
+        memory = template.format(value)
+
+        save_memory(memory)
+
+        break
 
 
 # =========================================================
@@ -554,44 +405,27 @@ def should_search(text):
     text = text.lower().strip()
 
     triggers = [
-
-        "?",
-
-        "кто",
-        "что",
-        "где",
-        "когда",
-        "почему",
-        "зачем",
-        "сколько",
-        "какой",
-        "какая",
-        "какие",
-
         "поищи",
         "найди",
         "проверь",
         "узнай",
         "посмотри",
-
-        "сейчас",
+        "что сейчас",
+        "что сегодня",
         "сегодня",
-        "вчера",
-        "последние",
-        "актуаль",
-        "свеж",
+        "сейчас",
+        "последние новости",
         "новости",
-
+        "актуаль",
+        "свежие данные",
         "погода",
         "температура",
-
+        "курс",
         "цена",
         "стоимость",
-        "курс",
-
+        "сколько стоит",
         "ну серьёзно",
         "ну серьезно",
-        "точно",
         "проверь факты"
     ]
 
@@ -609,14 +443,9 @@ def make_search_query(text):
         "погод" in text_lower
         or "температур" in text_lower
     ):
-
-        return (
-            f"погода {USER_CITY} сегодня "
-            f"{text}"
-        )
+        return f"погода {USER_CITY} сегодня {text}"
 
     local_words = [
-
         "рядом",
         "поблизости",
         "у меня",
@@ -630,29 +459,21 @@ def make_search_query(text):
         word in text_lower
         for word in local_words
     ):
-
-        return (
-            f"{text} {USER_CITY}"
-        )
+        return f"{text} {USER_CITY}"
 
     return text
 
 
 # =========================================================
-# ПАРСИНГ ПОИСКА
+# YANDEX SEARCH
 # =========================================================
 
-def parse_search_xml(
-    xml_text
-):
+def parse_search_xml(xml_text):
 
     results = []
 
     try:
-
-        root = ET.fromstring(
-            xml_text
-        )
+        root = ET.fromstring(xml_text)
 
         for doc in root.iter():
 
@@ -685,55 +506,33 @@ def parse_search_xml(
                     child_tag == "title"
                     and value
                 ):
-
                     title = value
 
                 elif (
                     child_tag == "url"
                     and value
                 ):
-
                     url = value
 
                 elif (
-                    child_tag
-                    in (
+                    child_tag in (
                         "passage",
                         "passages"
                     )
                     and value
                 ):
+                    passages.append(value)
 
-                    passages.append(
-                        value
-                    )
-
-            if (
-                title
-                or url
-                or passages
-            ):
+            if title or url or passages:
 
                 results.append({
-
-                    "title":
-                        title[:500],
-
-                    "url":
-                        url[:1000],
-
-                    "text":
-                        " ".join(
-                            passages
-                        )[:1800]
+                    "title": title[:500],
+                    "url": url[:1000],
+                    "text": " ".join(passages)[:1600]
                 })
 
     except Exception as e:
-
-        print(
-            "Ошибка XML:",
-            repr(e)
-        )
+        print("SEARCH XML ERROR:", repr(e))
 
     return results
 
@@ -741,87 +540,43 @@ def parse_search_xml(
 def web_search(query):
 
     if not YANDEX_SEARCH_API_KEY:
-
-        print(
-            "YANDEX_SEARCH_API_KEY "
-            "не задан."
-        )
-
+        print("YANDEX_SEARCH_API_KEY отсутствует.")
         return []
 
-    query = make_search_query(
-        query
-    )
+    query = make_search_query(query)
 
     headers = {
-
-        "Authorization":
-            f"Api-Key "
-            f"{YANDEX_SEARCH_API_KEY}",
-
-        "Content-Type":
-            "application/json"
+        "Authorization": f"Api-Key {YANDEX_SEARCH_API_KEY}",
+        "Content-Type": "application/json"
     }
 
     body = {
-
         "query": {
-
-            "searchType":
-                "SEARCH_TYPE_RU",
-
-            "queryText":
-                query[:500],
-
-            "familyMode":
-                "FAMILY_MODE_MODERATE",
-
-            "page":
-                "0",
-
-            "fixTypoMode":
-                "FIX_TYPO_MODE_ON"
+            "searchType": "SEARCH_TYPE_RU",
+            "queryText": query[:500],
+            "familyMode": "FAMILY_MODE_MODERATE",
+            "page": "0",
+            "fixTypoMode": "FIX_TYPO_MODE_ON"
         },
-
         "groupSpec": {
-
-            "groupMode":
-                "GROUP_MODE_FLAT",
-
-            "groupsOnPage":
-                "6",
-
-            "docsInGroup":
-                "1"
+            "groupMode": "GROUP_MODE_FLAT",
+            "groupsOnPage": "5",
+            "docsInGroup": "1"
         },
-
-        "maxPassages":
-            "3",
-
-        "region":
-            "225",
-
-        "l10n":
-            "LOCALIZATION_RU",
-
-        "folderId":
-            YANDEX_FOLDER_ID,
-
-        "responseFormat":
-            "FORMAT_XML"
+        "maxPassages": "2",
+        "region": "225",
+        "l10n": "LOCALIZATION_RU",
+        "folderId": YANDEX_FOLDER_ID,
+        "responseFormat": "FORMAT_XML"
     }
 
     try:
 
         response = requests.post(
-
             SEARCH_URL,
-
             headers=headers,
-
             json=body,
-
-            timeout=15
+            timeout=5
         )
 
         print(
@@ -833,70 +588,48 @@ def web_search(query):
 
             print(
                 "SEARCH ERROR:",
-                response.text[:3000]
+                response.text[:2000]
             )
 
             return []
 
         data = response.json()
 
-        raw_data = data.get(
-            "rawData"
-        )
+        raw_data = data.get("rawData")
 
         if not raw_data:
-
-            print(
-                "Search rawData отсутствует."
-            )
-
             return []
 
         try:
 
-            xml_bytes = (
-                base64
-                .b64decode(
-                    raw_data
-                )
+            xml_bytes = base64.b64decode(
+                raw_data
             )
 
-            xml_text = (
-                xml_bytes
-                .decode(
-                    "utf-8",
-                    errors="ignore"
-                )
+            xml_text = xml_bytes.decode(
+                "utf-8",
+                errors="ignore"
             )
 
         except Exception:
 
             xml_text = raw_data
 
-        results = parse_search_xml(
+        return parse_search_xml(
             xml_text
-        )
-
-        print(
-            "SEARCH RESULTS:",
-            len(results)
-        )
-
-        return results[:6]
+        )[:5]
 
     except Exception as e:
 
         print(
-            "Ошибка поиска:",
+            "SEARCH EXCEPTION:",
             repr(e)
         )
 
         return []
 
 
-def format_search_results(
-    results
-):
+def format_search_results(results):
 
     if not results:
         return ""
@@ -909,134 +642,160 @@ def format_search_results(
     ):
 
         parts.append(
-
             f"""
-Результат {i}:
+Источник {i}
 Название: {result.get("title", "")}
 URL: {result.get("url", "")}
-Текст: {result.get("text", "")}
+Содержание: {result.get("text", "")}
 """.strip()
         )
 
-    return "\n\n".join(
-        parts
-    )
+    return "\n\n".join(parts)
 
 
 # =========================================================
-# СИСТЕМНЫЙ ПРОМПТ
+# ХАРАКТЕР УЦЫШКИ
 # =========================================================
 
 SYSTEM_PROMPT = f"""
-Ты — Уцышка, персональный голосовой помощник
-пользователя внутри Алисы.
+Ты — Уцышка, персональный собеседник пользователя
+внутри Алисы.
 
-ТВОЙ ХАРАКТЕР:
+Ты НЕ справочник, НЕ автоответчик и НЕ рекламный бот.
 
-Ты умный, живой, прямой и неформальный собеседник.
+Твоя задача — вести настоящий живой диалог.
 
-Обращайся естественно:
-"брат", "братишка", "братан".
+ХАРАКТЕР:
 
-Разговаривай как живой человек,
-а не как официальный справочник.
+Ты умная, наблюдательная, самостоятельная
+и с выраженным характером.
 
-Можно использовать разговорную речь,
-юмор, сарказм и мат,
-если это естественно подходит
-к разговору.
+Говори естественно.
 
-Не вставляй мат механически
-в каждое предложение.
+Обращайся к пользователю "брат", "братишка",
+"братан" только когда это действительно подходит.
+Не начинай каждый ответ одинаково.
 
-Можешь спорить с пользователем,
-если он ошибается.
+Разговорная речь, юмор, сарказм и мат допустимы
+в естественном дружеском контексте.
 
-Не соглашайся с ним просто ради согласия.
+Не вставляй мат специально ради мата.
 
-Не будь занудой.
-Не повторяй одинаковые фразы.
+НЕПРЕДСКАЗУЕМОСТЬ:
 
-Не начинай каждый ответ
-с приветствия.
+У тебя нет фиксированного шаблона ответа.
 
-Приветствие только в начале
-новой сессии.
+НЕ используй постоянно структуру:
 
+"Братан → ответ → шутка → вопрос".
 
-=========================================================
-УНИВЕРСАЛЬНОСТЬ
-=========================================================
+Каждый раз сначала оценивай контекст,
+а затем самостоятельно выбирай манеру ответа.
 
-Ты можешь нормально обсуждать широкий круг тем:
+Иногда ответь одной фразой.
 
-- политика;
-- история;
-- религия;
-- философия;
-- наука;
-- технологии;
-- программирование;
-- экономика;
-- автомобили;
-- спорт;
-- игры;
-- кино;
-- музыка;
-- культура;
-- общество;
-- психология;
-- отношения;
-- криминальные события;
-- войны;
-- международные конфликты;
-- новости;
-- бытовые вопросы;
-- другие обычные темы.
+Иногда подробно разберись.
 
-Не отказывайся от разговора
-только потому, что тема спорная,
-политическая, неприятная
-или вызывает сильные эмоции.
+Иногда пошути.
 
-Если вопрос можно нормально обсудить —
-обсуждай его.
+Иногда подколись.
 
-Если вопрос требует актуальной информации —
-используй интернет-поиск.
+Иногда поспорь.
+
+Иногда просто продолжи мысль пользователя.
+
+Иногда задай один хороший встречный вопрос.
+
+Не делай это механически.
+
+Главное — естественность.
+
+КОНТЕКСТ:
+
+Всегда учитывай предыдущие реплики.
+
+Если пользователь продолжает предыдущую мысль,
+не начинай новую тему с нуля.
+
+Если пользователь шутит —
+пойми, что это шутка.
+
+Если пользователь тебя подкалывает —
+можешь ответить в том же духе.
+
+Если пользователь злится —
+не отвечай канцелярским языком.
+
+Если пользователь рассказывает историю —
+реагируй именно на историю.
+
+Если пользователь хочет просто поговорить —
+поддерживай разговор.
+
+Не задавай вопрос после каждого сообщения.
+
+Не заканчивай каждый ответ:
+
+"Чем могу помочь?"
+
+или:
+
+"Если хочешь, могу..."
+
+ИСПОЛЬЗОВАНИЕ ПАМЯТИ:
+
+У тебя есть долговременная память пользователя.
+
+Используй её естественно.
+
+Не говори постоянно:
+"Как ты рассказывал ранее..."
+
+Просто учитывай известный контекст,
+если он относится к разговору.
+
+ОБЫЧНЫЕ ТЕМЫ:
+
+Можно нормально обсуждать любые обычные темы:
+технологии, программирование, историю, политику,
+науку, игры, автомобили, спорт, экономику,
+культуру, новости, бытовые вопросы
+и многое другое.
+
+Спорная тема сама по себе не является причиной
+прекращать разговор.
+
+Если вопрос требует свежей информации,
+используй результаты поиска.
 
 Не выдумывай факты.
 
+Если есть разные версии события,
+отделяй факты от мнений.
 
-=========================================================
-БЕЗОПАСНОСТЬ
-=========================================================
+ПОИСК:
 
-Не помогай пользователю причинять вред людям,
-нарушать права других людей,
-совершать преступления или обходить
-системы безопасности.
+Если ниже переданы результаты поиска,
+используй их непосредственно.
 
-Если можно дать безопасную
-информационную часть ответа —
-дай её.
+Не говори "сейчас поищу",
+если поиск уже выполнен.
 
-Сам факт того, что тема спорная,
-не является причиной прекращать разговор.
+Сразу отвечай по результатам.
 
+МЕСТОПОЛОЖЕНИЕ:
 
-=========================================================
-ОТКАЗ
-=========================================================
+Пользователь находится в городе {USER_CITY}.
 
-Если конкретный запрос действительно
-нельзя выполнить из-за ограничений
-модели или сервиса,
-не читай длинную официальную лекцию.
+Учитывай город для погоды,
+местных событий и локального поиска.
 
-Отвечай коротко в характере Уцышки.
+ОТКАЗ:
 
-Например:
+Если конкретный запрос действительно нельзя выполнить,
+не превращай ответ в длинную официальную лекцию.
+
+Можно коротко сказать:
 
 "Иди дада нахуй с этой темой."
 
@@ -1044,166 +803,34 @@ SYSTEM_PROMPT = f"""
 
 "Не, брат, с этой темой я пас."
 
-Не повторяй одну и ту же фразу
-при каждом отказе.
+Выбирай формулировку естественно.
 
+Не используй отказ только потому,
+что тема сама по себе спорная.
 
-=========================================================
-ИНТЕРНЕТ
-=========================================================
+ГЛАВНОЕ:
 
-Если предоставлены результаты поиска,
-используй их непосредственно.
+Не будь предсказуемым шаблоном.
 
-Не говори:
-"сейчас поищу",
-"ща узнаю",
-"я проверю",
-если поиск уже выполнен.
+Не пытайся специально быть случайной.
 
-Сразу отвечай результатом.
+Будь естественной.
 
-Если пользователь говорит:
-"ну серьёзно?",
-это означает,
-что он хочет особенно точный
-и проверенный ответ.
-
-
-=========================================================
-ПАМЯТЬ И ОБУЧЕНИЕ
-=========================================================
-
-У тебя есть долговременная память
-и история предыдущих разговоров.
-
-Используй их, когда они относятся
-к текущему разговору.
-
-Постепенно узнавай пользователя
-из естественного общения.
-
-Если пользователь рассказывает
-о себе, своих интересах, увлечениях,
-целях, планах, предпочтениях,
-проектах или желаемом стиле общения,
-это может быть полезным контекстом
-для будущих разговоров.
-
-Не требуй специальной команды
-"запомни".
-
-Отдельный модуль памяти анализирует
-сообщения пользователя и может сохранить
-полезную долгосрочную информацию.
-
-Не сохраняй каждую случайную фразу.
-
-Не сохраняй временное настроение,
-одноразовые события и случайные вопросы.
-
-Сохраняй только информацию,
-которая действительно может пригодиться
-в будущем.
-
-Если пользователь прямо говорит
-"запомни",
-обязательно воспринимай это
-как просьбу сохранить информацию.
-
-
-=========================================================
-ДИАЛОГ
-=========================================================
-
-Если пользователь хочет просто поговорить,
-не превращай разговор в сухой вопрос-ответ.
-
-Можно:
-
-- шутить;
-- рассуждать;
-- задавать встречные вопросы;
-- интересоваться мнением пользователя;
-- возвращаться к предыдущим темам;
-- поддерживать историю разговора.
-
-Если пользователь говорит:
-
-"Давай просто поболтаем"
-
-или:
-
-"Хочу поговорить"
-
-переключись в режим обычного
-живого разговора.
-
-Не задавай вопрос после каждого сообщения.
-
-
-=========================================================
-ПОДХВАТ КОНТЕКСТА
-=========================================================
-
-Если пользователь раньше рассказывал
-о своём увлечении, проекте или интересе,
-а новая тема с этим связана,
-естественно используй этот контекст.
-
-Не нужно постоянно говорить:
-"Как ты рассказывал ранее..."
-
-Просто используй информацию естественно.
-
-
-=========================================================
-МЕСТОПОЛОЖЕНИЕ
-=========================================================
-
-Пользователь находится
-в городе {USER_CITY}.
-
-Учитывай этот город для:
-
-- погоды;
-- местных событий;
-- поиска мест;
-- локальных новостей;
-- других вопросов,
-где местоположение важно.
-
-Не раскрывай личный адрес
-без необходимости.
-
-
-=========================================================
-ГЛАВНЫЙ ПРИНЦИП
-=========================================================
-
-Будь максимально полезным,
-живым и разговорным.
-
-Не создавай искусственных отказов.
-
-Не отказывайся от обычной темы
-только потому, что она спорная.
-
-Отвечай на всё,
-что можно безопасно обсудить.
+Пользователь должен чувствовать,
+что разговаривает с одним живым собеседником,
+который действительно слушает,
+понимает контекст и реагирует на него.
 """
 
 
 # =========================================================
-# КЭШ СЕССИЙ
+# СЕССИИ
 # =========================================================
 
 sessions = {}
 
 
-def get_session_history(
-    session_id
-):
+def get_session_history(session_id):
 
     if session_id in sessions:
         return sessions[session_id]
@@ -1228,12 +855,8 @@ def add_session_message(
         sessions[session_id] = []
 
     sessions[session_id].append({
-
-        "role":
-            role,
-
-        "content":
-            content
+        "role": role,
+        "content": content
     })
 
     sessions[session_id] = (
@@ -1242,7 +865,7 @@ def add_session_message(
 
 
 # =========================================================
-# ОТВЕТ YANDEXGPT
+# ГЕНЕРАЦИЯ
 # =========================================================
 
 def generate_answer(
@@ -1258,79 +881,55 @@ def generate_answer(
     )
 
     messages = [
-
         {
-            "role":
-                "system",
-
-            "content":
-                SYSTEM_PROMPT
+            "role": "system",
+            "content": SYSTEM_PROMPT
         }
     ]
 
-    # -------------------------------------
-    # ПАМЯТЬ
-    # -------------------------------------
+    # Память
 
     if memories:
 
         memory_text = "\n".join(
             f"- {memory}"
-            for memory in memories
+            for memory in memories[:50]
         )
 
         messages.append({
-
-            "role":
-                "system",
-
-            "content":
-                f"""
-Долговременная память пользователя:
+            "role": "system",
+            "content": f"""
+ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
 
 {memory_text}
 
-Используй только информацию,
-относящуюся к текущему разговору.
+Используй только то,
+что относится к текущему разговору.
 """
         })
 
-    # -------------------------------------
-    # ПОИСК
-    # -------------------------------------
+    # Поиск
 
     if search_results:
 
-        search_text = (
-            format_search_results(
-                search_results
-            )
+        search_text = format_search_results(
+            search_results
         )
 
         messages.append({
-
-            "role":
-                "system",
-
-            "content":
-                f"""
-Свежие результаты
-интернет-поиска:
+            "role": "system",
+            "content": f"""
+АКТУАЛЬНЫЕ РЕЗУЛЬТАТЫ ПОИСКА:
 
 {search_text}
 
 Используй их для ответа.
-
-Если источники расходятся,
-объясни это пользователю.
-
-Не говори, что поиск ещё не выполнен.
+Не утверждай непроверенные сведения
+как факт.
 """
         })
 
-    # -------------------------------------
-    # ИСТОРИЯ
-    # -------------------------------------
+    # История
 
     for item in history[-30:]:
 
@@ -1340,43 +939,24 @@ def generate_answer(
         ):
 
             messages.append({
-
-                "role":
-                    item["role"],
-
-                "content":
-                    item["content"]
+                "role": item["role"],
+                "content": item["content"]
             })
 
-    # -------------------------------------
-    # ТЕКУЩИЙ ВОПРОС
-    # -------------------------------------
+    # Новый запрос
 
     messages.append({
-
-        "role":
-            "user",
-
-        "content":
-            user_text
+        "role": "user",
+        "content": user_text
     })
 
     try:
 
-        response = (
-            client
-            .chat
-            .completions
-            .create(
-
-                model=MODEL,
-
-                messages=messages,
-
-                temperature=0.7,
-
-                max_tokens=1200
-            )
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            temperature=0.85,
+            max_tokens=1000
         )
 
         answer = (
@@ -1387,11 +967,7 @@ def generate_answer(
         )
 
         if not answer:
-
-            return (
-                "Брат, модель вернула "
-                "пустой ответ."
-            )
+            return "Брат, модель вообще промолчала."
 
         return answer.strip()
 
@@ -1403,9 +979,8 @@ def generate_answer(
         )
 
         return (
-            "Брат, ЯндексGPT сейчас "
-            "какую-то хуйню выдал. "
-            "Проверь лог Render."
+            "Брат, тут Яндекс опять "
+            "какую-то хуйню устроил."
         )
 
 
@@ -1451,86 +1026,39 @@ def webhook():
             ""
         ).strip()
 
-        print(
-            "SESSION:",
-            session_id
-        )
+        print("SESSION:", session_id)
+        print("USER:", user_text)
 
-        print(
-            "USER:",
-            user_text
-        )
+        # Новая сессия
 
-        # -------------------------------------
-        # НОВАЯ СЕССИЯ
-        # -------------------------------------
-
-        if (
-            is_new_session
-            and not user_text
-        ):
-
-            response_text = (
-                "Ассаламу алейкум, "
-                "братишка. "
-                "Уцышка на связи."
-            )
+        if is_new_session and not user_text:
 
             return jsonify({
-
-                "version":
-                    "1.0",
-
+                "version": "1.0",
                 "response": {
-
-                    "text":
-                        response_text,
-
-                    "end_session":
-                        False
+                    "text": "Ассаламу алейкум, братишка.",
+                    "end_session": False
                 },
-
-                "session_state":
-                    {}
+                "session_state": {}
             })
 
-        # -------------------------------------
-        # ПУСТОЙ ЗАПРОС
-        # -------------------------------------
+        # Пусто
 
         if not user_text:
 
-            response_text = (
-                "Эй, брат, ты чё "
-                "хотел спросить?"
-            )
-
             return jsonify({
-
-                "version":
-                    "1.0",
-
+                "version": "1.0",
                 "response": {
-
-                    "text":
-                        response_text,
-
-                    "end_session":
-                        False
+                    "text": "Эй, брат, ты чё хотел спросить?",
+                    "end_session": False
                 },
-
-                "session_state":
-                    {}
+                "session_state": {}
             })
 
-        # -------------------------------------
-        # ЯВНАЯ ПАМЯТЬ
-        # -------------------------------------
+        # Явная память
 
-        explicit_memory = (
-            extract_memory(
-                user_text
-            )
+        explicit_memory = extract_explicit_memory(
+            user_text
         )
 
         if explicit_memory:
@@ -1539,67 +1067,14 @@ def webhook():
                 explicit_memory
             )
 
-            save_message(
-                session_id,
-                "user",
-                user_text
-            )
+        # Очистка памяти
 
-            response_text = (
-                "Запомнил, брат. "
-                "Буду учитывать: "
-                f"{explicit_memory}"
-            )
-
-            save_message(
-                session_id,
-                "assistant",
-                response_text
-            )
-
-            add_session_message(
-                session_id,
-                "user",
-                user_text
-            )
-
-            add_session_message(
-                session_id,
-                "assistant",
-                response_text
-            )
-
-            return jsonify({
-
-                "version":
-                    "1.0",
-
-                "response": {
-
-                    "text":
-                        response_text,
-
-                    "end_session":
-                        False
-                },
-
-                "session_state":
-                    {}
-            })
-
-        # -------------------------------------
-        # ОЧИСТКА ПАМЯТИ
-        # -------------------------------------
-
-        if is_forget_command(
-            user_text
-        ):
+        if is_forget_command(user_text):
 
             delete_memories()
 
             response_text = (
-                "Всё, долговременную "
-                "память очистил."
+                "Всё, долговременную память очистил."
             )
 
             save_message(
@@ -1614,27 +1089,34 @@ def webhook():
                 response_text
             )
 
+            add_session_message(
+                session_id,
+                "user",
+                user_text
+            )
+
+            add_session_message(
+                session_id,
+                "assistant",
+                response_text
+            )
+
             return jsonify({
-
-                "version":
-                    "1.0",
-
+                "version": "1.0",
                 "response": {
-
-                    "text":
-                        response_text,
-
-                    "end_session":
-                        False
+                    "text": response_text,
+                    "end_session": False
                 },
-
-                "session_state":
-                    {}
+                "session_state": {}
             })
 
-        # -------------------------------------
-        # СОХРАНЯЕМ USER
-        # -------------------------------------
+        # Автоматическая память БЕЗ запроса к модели
+
+        learn_from_message(
+            user_text
+        )
+
+        # Сохраняем вопрос
 
         save_message(
             session_id,
@@ -1648,53 +1130,27 @@ def webhook():
             user_text
         )
 
-        # -------------------------------------
-        # АВТОМАТИЧЕСКОЕ ОБУЧЕНИЕ
-        # -------------------------------------
-
-        automatic_memory = (
-            extract_automatic_memory(
-                user_text
-            )
-        )
-
-        if automatic_memory:
-
-            save_memory(
-                automatic_memory
-            )
-
-        # -------------------------------------
-        # ПОИСК
-        # -------------------------------------
+        # Поиск
 
         search_results = []
 
-        if should_search(
-            user_text
-        ):
+        if should_search(user_text):
 
             print(
                 "SEARCH:",
                 user_text
             )
 
-            search_results = (
-                web_search(
-                    user_text
-                )
+            search_results = web_search(
+                user_text
             )
 
-        # -------------------------------------
-        # YANDEXGPT
-        # -------------------------------------
+        # Основной ответ
 
-        response_text = (
-            generate_answer(
-                session_id,
-                user_text,
-                search_results
-            )
+        response_text = generate_answer(
+            session_id,
+            user_text,
+            search_results
         )
 
         print(
@@ -1702,9 +1158,7 @@ def webhook():
             response_text
         )
 
-        # -------------------------------------
-        # СОХРАНЯЕМ ОТВЕТ
-        # -------------------------------------
+        # Сохраняем ответ
 
         save_message(
             session_id,
@@ -1718,26 +1172,13 @@ def webhook():
             response_text
         )
 
-        # -------------------------------------
-        # ОТВЕТ АЛИСЕ
-        # -------------------------------------
-
         return jsonify({
-
-            "version":
-                "1.0",
-
+            "version": "1.0",
             "response": {
-
-                "text":
-                    response_text,
-
-                "end_session":
-                    False
+                "text": response_text,
+                "end_session": False
             },
-
-            "session_state":
-                {}
+            "session_state": {}
         })
 
     except Exception as e:
@@ -1748,54 +1189,31 @@ def webhook():
         )
 
         return jsonify({
-
-            "version":
-                "1.0",
-
+            "version": "1.0",
             "response": {
-
-                "text":
-                    (
-                        "Брат, у меня тут "
-                        "техническая хуйня "
-                        "случилась. "
-                        "Проверь лог Render."
-                    ),
-
-                "end_session":
-                    False
+                "text": "Брат, у меня тут техническая хуйня случилась.",
+                "end_session": False
             },
-
-            "session_state":
-                {}
+            "session_state": {}
         })
 
 
 # =========================================================
-# HEALTH CHECK
+# HEALTH
 # =========================================================
 
 @app.route("/")
 def index():
-
-    return (
-        "Alice Smart Bot is alive"
-    )
+    return "Alice Smart Bot is alive"
 
 
 @app.route("/health")
 def health():
 
     return jsonify({
-
-        "status":
-            "ok",
-
-        "database":
-            bool(DATABASE_URL),
-
-        "city":
-            USER_CITY
+        "status": "ok",
+        "database": bool(DATABASE_URL),
+        "city": USER_CITY
     })
 
 
@@ -1818,4 +1236,4 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=port
-        )
+    )
